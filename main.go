@@ -53,11 +53,6 @@ import (
 	"os"
 )
 
-type KinesisFirehoseEventExtended struct {
-	KinesisStreamArn string `json:"sourceKinesisStreamArn"`
-	events.KinesisFirehoseEvent
-}
-
 type LogOutput struct {
 	Owner     string `json:"owner"`
 	LogGroup  string `json:"logGroup"`
@@ -76,7 +71,7 @@ func main() {
 	lambda.Start(handleRequest)
 }
 
-func handleRequest(firehoseEvent KinesisFirehoseEventExtended) (events.KinesisFirehoseResponse, error) {
+func handleRequest(firehoseEvent events.KinesisFirehoseEvent) (events.KinesisFirehoseResponse, error) {
 	records := processRecords(firehoseEvent.Records)
 	return events.KinesisFirehoseResponse{Records: records}, nil
 }
