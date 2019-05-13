@@ -41,16 +41,17 @@ modify the transformLogEvent method to perform custom transformations on the log
 5) Concatenate the result from (4) together and set the result as the data of the record returned to Firehose. Note that
 this step will not add any delimiters. Delimiters should be appended by the logic within the transformLogEvent
 method.
+6) Any additional records which exceed 6MB will be re-ingested back into the source Kinesis stream or Firehose.
 */
 package main
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/bhavikkumar/kinesis-firehose-cloudwatch-log-processor/cloudwatch/logs"
 	log "github.com/sirupsen/logrus"
 	"os"
+	"strings"
 )
 
 type LogOutput struct {
@@ -72,62 +73,42 @@ func main() {
 }
 
 func handleRequest(firehoseEvent events.KinesisFirehoseEvent) (events.KinesisFirehoseResponse, error) {
-	records := processRecords(firehoseEvent.Records)
-	return events.KinesisFirehoseResponse{Records: records}, nil
+	processedRecords := processRecords(firehoseEvent.Records)
+	//isSourceAStream, region, streamName := getSourceStream(firehoseEvent.SourceKinesisStreamArn, firehoseEvent.DeliveryStreamArn)
+
+	//processRecordsForReingst(processedRecords, isSourceAStream, region, streamName)
+
+	return events.KinesisFirehoseResponse{Records: processedRecords}, nil
 }
+
+func getSourceStream(sourceKinesisStream string, firehoseDeliveryStream string) (bool, string, string) {
+	isSourceAStream := sourceKinesisStream != ""
+	streamARN := sourceKinesisStream
+	if !isSourceAStream {
+		streamARN = firehoseDeliveryStream
+	}
+	region := strings.Split(streamARN, ":")[3]
+	streamName := strings.Split(streamARN, "/")[1]
+	return isSourceAStream, region, streamName
+}
+
+//func processRecordsForReingst(processedRecords []events.KinesisFirehoseResponseRecord) {
+//	projectedSize := 0
+//	for i, record := range processedRecords {
+//		projectedSize += len(record.RecordID) + len(record.Result) + len(record.Data)
+//		// 6000000 instead of 6291456 to leave ample headroom for the stuff we didn't account for
+//		if projectedSize > 6000000 && record.Result != events.KinesisFirehoseTransformedStateOk {
+//
+//		}
+//	}
+//
+//}
 
 func processRecords(records []events.KinesisFirehoseEventRecord) []events.KinesisFirehoseResponseRecord {
 	response := make([]events.KinesisFirehoseResponseRecord, len(records))
 	for i, record := range records {
-		cloudwatchLogData, _ := processRecord(record)
-		if "CONTROL_MESSAGE" == cloudwatchLogData.MessageType {
-			response[i] = events.KinesisFirehoseResponseRecord{
-				RecordID: record.RecordID,
-				Result:   events.KinesisFirehoseTransformedStateDropped,
-			}
-		} else if "DATA_MESSAGE" == cloudwatchLogData.MessageType {
-			response[i] = events.KinesisFirehoseResponseRecord{
-				RecordID: record.RecordID,
-				Result:   events.KinesisFirehoseTransformedStateOk,
-				Data:     transformLogEvent(cloudwatchLogData),
-			}
-		} else {
-			response[i] = events.KinesisFirehoseResponseRecord{
-				RecordID: record.RecordID,
-				Result:   events.KinesisFirehoseTransformedStateProcessingFailed,
-			}
-		}
-	}
-	return response
-}
-
-func processRecord(record events.KinesisFirehoseEventRecord) (events.CloudwatchLogsData, error) {
-	cloudwatchLogsRawData := events.CloudwatchLogsRawData{Data: base64.StdEncoding.EncodeToString(record.Data)}
-	return cloudwatchLogsRawData.Parse()
-}
-
-func transformLogEvent(cloudwatchLogData events.CloudwatchLogsData) []byte {
-	var logs []byte
-	for _, logEvent := range cloudwatchLogData.LogEvents {
-		output := LogOutput{
-			Owner:     cloudwatchLogData.Owner,
-			LogGroup:  cloudwatchLogData.LogGroup,
-			ID:        logEvent.ID,
-			Message:   logEvent.Message,
-			Timestamp: logEvent.Timestamp,
-		}
-		logs = append(logs, output.ToBytes()...)
-	}
-	return logs
-}
-
-func (lo LogOutput) ToBytes() []byte {
-	var response []byte
-	bytes, err := json.Marshal(lo)
-	if err != nil {
-		log.WithError(err).Error("Failed to encode log to JSON")
-	} else {
-		response = append(bytes, "\n"...)
+		cloudwatchLogData, _ := logs.ProcessFirehoseRecord(record)
+		response[i] = logs.GetFirehoseResponse(record.RecordID, cloudwatchLogData)
 	}
 	return response
 }
