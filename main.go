@@ -48,19 +48,10 @@ package main
 import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/bhavikkumar/kinesis-firehose-cloudwatch-log-processor/cloudwatch/logs"
+	"github.com/bhavikkumar/kinesis-firehose-cloudwatch-log-processor/kinesis/firehose"
 	log "github.com/sirupsen/logrus"
 	"os"
-	"strings"
 )
-
-type LogOutput struct {
-	Owner     string `json:"owner"`
-	LogGroup  string `json:"logGroup"`
-	ID        string `json:"id"`
-	Timestamp int64  `json:"timestamp"`
-	Message   string `json:"message"`
-}
 
 func init() {
 	log.SetFormatter(&log.JSONFormatter{})
@@ -73,23 +64,8 @@ func main() {
 }
 
 func handleRequest(firehoseEvent events.KinesisFirehoseEvent) (events.KinesisFirehoseResponse, error) {
-	processedRecords := processRecords(firehoseEvent.Records)
-	//isSourceAStream, region, streamName := getSourceStream(firehoseEvent.SourceKinesisStreamArn, firehoseEvent.DeliveryStreamArn)
 
-	//processRecordsForReingst(processedRecords, isSourceAStream, region, streamName)
-
-	return events.KinesisFirehoseResponse{Records: processedRecords}, nil
-}
-
-func getSourceStream(sourceKinesisStream string, firehoseDeliveryStream string) (bool, string, string) {
-	isSourceAStream := sourceKinesisStream != ""
-	streamARN := sourceKinesisStream
-	if !isSourceAStream {
-		streamARN = firehoseDeliveryStream
-	}
-	region := strings.Split(streamARN, ":")[3]
-	streamName := strings.Split(streamARN, "/")[1]
-	return isSourceAStream, region, streamName
+	return firehose.ProcessFirehoseEvent(firehoseEvent)
 }
 
 //func processRecordsForReingst(processedRecords []events.KinesisFirehoseResponseRecord) {
@@ -103,12 +79,3 @@ func getSourceStream(sourceKinesisStream string, firehoseDeliveryStream string) 
 //	}
 //
 //}
-
-func processRecords(records []events.KinesisFirehoseEventRecord) []events.KinesisFirehoseResponseRecord {
-	response := make([]events.KinesisFirehoseResponseRecord, len(records))
-	for i, record := range records {
-		cloudwatchLogData, _ := logs.ProcessFirehoseRecord(record)
-		response[i] = logs.GetFirehoseResponse(record.RecordID, cloudwatchLogData)
-	}
-	return response
-}
