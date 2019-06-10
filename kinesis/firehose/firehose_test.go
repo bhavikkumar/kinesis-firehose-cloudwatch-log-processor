@@ -1,6 +1,7 @@
 package firehose_test
 
 import (
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/bhavikkumar/kinesis-firehose-cloudwatch-log-processor/kinesis/firehose"
 	"github.com/stretchr/testify/assert"
 	"testing"
@@ -35,5 +36,21 @@ func TestGetSourceStream(t *testing.T) {
 		if err != nil {
 			assert.EqualError(t, err, test.err)
 		}
+	}
+}
+
+func TestCreateReingestData(t *testing.T) {
+	var tests = []struct {
+		record          events.KinesisFirehoseEventRecord
+		isSourceAStream bool
+		reingestData    firehose.ReingestRecord
+	}{
+		{events.KinesisFirehoseEventRecord{Data: []byte("test"), KinesisFirehoseRecordMetadata: events.KinesisFirehoseRecordMetadata{PartitionKey: "partitionKey"}}, true, firehose.ReingestRecord{Data: []byte("test"), PartitionKey: "partitionKey"}},
+		{events.KinesisFirehoseEventRecord{Data: []byte("firehose")}, false, firehose.ReingestRecord{Data: []byte("firehose")}},
+	}
+
+	for _, test := range tests {
+		reingestData := firehose.CreateReingestData(test.record, test.isSourceAStream)
+		assert.Equal(t, test.reingestData, reingestData)
 	}
 }

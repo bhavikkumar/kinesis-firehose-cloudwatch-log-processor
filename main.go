@@ -64,18 +64,5 @@ func main() {
 }
 
 func handleRequest(firehoseEvent events.KinesisFirehoseEvent) (events.KinesisFirehoseResponse, error) {
-
 	return firehose.ProcessFirehoseEvent(firehoseEvent)
 }
-
-//func processRecordsForReingst(processedRecords []events.KinesisFirehoseResponseRecord) {
-//	projectedSize := 0
-//	for i, record := range processedRecords {
-//		projectedSize += len(record.RecordID) + len(record.Result) + len(record.Data)
-//		// 6000000 instead of 6291456 to leave ample headroom for the stuff we didn't account for
-//		if projectedSize > 6000000 && record.Result != events.KinesisFirehoseTransformedStateOk {
-//
-//		}
-//	}
-//
-//}

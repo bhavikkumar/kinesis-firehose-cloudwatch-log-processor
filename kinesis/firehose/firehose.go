@@ -7,14 +7,74 @@ import (
 	"strings"
 )
 
+type ReingestRecord struct {
+	Data         []byte `json:"data"`
+	PartitionKey string `json:"partitionKey,omitempty"`
+}
+
 func ProcessFirehoseEvent(firehoseEvent events.KinesisFirehoseEvent) (events.KinesisFirehoseResponse, error) {
-	records := firehoseEvent.Records
+	isSourceAStream, _, _, err := GetSourceStream(firehoseEvent.SourceKinesisStreamArn, firehoseEvent.DeliveryStreamArn)
+	if err != nil {
+		return events.KinesisFirehoseResponse{}, err
+	}
+
+	responseRecords, _ := ProcessRecords(firehoseEvent.Records, isSourceAStream)
+	// Process for reingestion
+
+	return events.KinesisFirehoseResponse{Records: responseRecords}, err
+}
+
+func ProcessRecords(records []events.KinesisFirehoseEventRecord, isSourceAStream bool) ([]events.KinesisFirehoseResponseRecord, []ReingestRecord) {
 	response := make([]events.KinesisFirehoseResponseRecord, len(records))
+	reingestData := make([]ReingestRecord, len(records))
 	for i, record := range records {
 		cloudwatchLogData, _ := logs.ProcessFirehoseRecord(record)
 		response[i] = logs.GetFirehoseResponse(record.RecordID, cloudwatchLogData)
+		reingestData[i] = CreateReingestData(record, isSourceAStream)
 	}
-	return events.KinesisFirehoseResponse{Records: response}, nil
+	return response, reingestData
+}
+
+func ProcessRecordsForReingst(processedRecords []events.KinesisFirehoseResponseRecord, reingestRecords []ReingestRecord) [][]ReingestRecord {
+	projectedSize := 0
+	totalRecordsToBeReingested := 0
+	var putRecordBatches [][]ReingestRecord
+	var recordsToReingest []ReingestRecord
+
+	for i, record := range processedRecords {
+		if record.Result == events.KinesisFirehoseTransformedStateOk {
+			continue
+		}
+
+		projectedSize += len(record.RecordID) + len(record.Result) + len(record.Data)
+		// 6000000 instead of 6291456 to leave ample headroom for the stuff we didn't account for
+		if projectedSize > 6000000 {
+			totalRecordsToBeReingested += 1
+			recordsToReingest = append(recordsToReingest, reingestRecords[i])
+
+			processedRecords[i].Result = events.KinesisFirehoseTransformedStateDropped
+			processedRecords[i].Data = nil
+
+			if len(recordsToReingest) == 500 {
+				putRecordBatches = append(putRecordBatches, recordsToReingest)
+				recordsToReingest = recordsToReingest[:0]
+			}
+		}
+	}
+
+	if len(recordsToReingest) > 0 {
+		putRecordBatches = append(putRecordBatches, recordsToReingest)
+		recordsToReingest = recordsToReingest[:0]
+	}
+	return putRecordBatches
+}
+
+func CreateReingestData(record events.KinesisFirehoseEventRecord, isSourceAStream bool) ReingestRecord {
+	data := ReingestRecord{Data: record.Data}
+	if isSourceAStream {
+		data.PartitionKey = record.KinesisFirehoseRecordMetadata.PartitionKey
+	}
+	return data
 }
 
 func GetSourceStream(sourceKinesisStream string, firehoseDeliveryStream string) (bool, string, string, error) {
