@@ -5,6 +5,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/bhavikkumar/kinesis-firehose-cloudwatch-log-processor/kinesis/firehose"
 	"github.com/stretchr/testify/assert"
+	"math/rand"
 	"testing"
 )
 
@@ -72,4 +73,46 @@ func TestProcessRecords(t *testing.T) {
 	assert.Len(t, responseRecords, 1)
 	assert.Len(t, reingestRecords, 1)
 	assert.Equal(t, reingestRecords[0].Data, record.Data)
+}
+
+func TestProcessRecordsForReingst(t *testing.T) {
+	var responseRecords []events.KinesisFirehoseResponseRecord
+	for i := 0; i < 1002; i++ {
+		record := events.KinesisFirehoseResponseRecord{
+			Data:     randStringBytes(11997),
+			Result:   events.KinesisFirehoseTransformedStateOk,
+			RecordID: "1",
+		}
+		responseRecords = append(responseRecords, record)
+	}
+
+	failedRecord := events.KinesisFirehoseResponseRecord{
+		Result: events.KinesisFirehoseTransformedStateProcessingFailed,
+	}
+	responseRecords = append(responseRecords, failedRecord)
+
+	var reingestRecords []firehose.ReingestRecord
+	for i := 0; i < len(responseRecords); i++ {
+		reingestRecord := firehose.ReingestRecord{
+			Data: []byte("49578734086442259037497492980620233840400173390482112514000000"),
+		}
+
+		reingestRecords = append(reingestRecords, reingestRecord)
+	}
+
+	records, reingst, recordsToReingest := firehose.ProcessRecordsForReingst(responseRecords, reingestRecords)
+
+	assert.Equal(t, 502, recordsToReingest)
+	assert.Len(t, reingst, 2)
+	assert.Equal(t, len(responseRecords), len(records))
+}
+
+const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+func randStringBytes(n int) []byte {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letterBytes[rand.Intn(len(letterBytes))]
+	}
+	return b
 }

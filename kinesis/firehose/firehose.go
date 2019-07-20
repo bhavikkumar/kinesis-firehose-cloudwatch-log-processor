@@ -35,14 +35,16 @@ func ProcessRecords(records []events.KinesisFirehoseEventRecord, isSourceAStream
 	return response, reingestData
 }
 
-func ProcessRecordsForReingst(processedRecords []events.KinesisFirehoseResponseRecord, reingestRecords []ReingestRecord) [][]ReingestRecord {
+func ProcessRecordsForReingst(processedRecords []events.KinesisFirehoseResponseRecord, reingestRecords []ReingestRecord) ([]events.KinesisFirehoseResponseRecord, [][]ReingestRecord, int) {
 	projectedSize := 0
 	totalRecordsToBeReingested := 0
+	var responseRecords []events.KinesisFirehoseResponseRecord
 	var putRecordBatches [][]ReingestRecord
 	var recordsToReingest []ReingestRecord
 
 	for i, record := range processedRecords {
-		if record.Result == events.KinesisFirehoseTransformedStateOk {
+		if record.Result != events.KinesisFirehoseTransformedStateOk {
+			responseRecords = append(responseRecords, record)
 			continue
 		}
 
@@ -52,21 +54,22 @@ func ProcessRecordsForReingst(processedRecords []events.KinesisFirehoseResponseR
 			totalRecordsToBeReingested += 1
 			recordsToReingest = append(recordsToReingest, reingestRecords[i])
 
-			processedRecords[i].Result = events.KinesisFirehoseTransformedStateDropped
-			processedRecords[i].Data = nil
+			record.Result = events.KinesisFirehoseTransformedStateDropped
+			record.Data = nil
 
 			if len(recordsToReingest) == 500 {
-				putRecordBatches = append(putRecordBatches, recordsToReingest)
+				putRecordBatches = append(putRecordBatches, recordsToReingest) // Send to source
 				recordsToReingest = recordsToReingest[:0]
 			}
 		}
+		responseRecords = append(responseRecords, record)
 	}
 
 	if len(recordsToReingest) > 0 {
-		putRecordBatches = append(putRecordBatches, recordsToReingest)
+		putRecordBatches = append(putRecordBatches, recordsToReingest) // Send to source
 		recordsToReingest = recordsToReingest[:0]
 	}
-	return putRecordBatches
+	return responseRecords, putRecordBatches, totalRecordsToBeReingested
 }
 
 func CreateReingestData(record events.KinesisFirehoseEventRecord, isSourceAStream bool) ReingestRecord {
